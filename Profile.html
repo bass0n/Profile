@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ハッシュブルーム</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            color: white;
+            font-family: system-ui, sans-serif;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        #bg-video {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            object-fit: cover;
+            filter: brightness(0.45);
+            opacity: 0;
+            transition: opacity 1.2s ease;
+        }
+        #bg-video.visible { opacity: 1; }
+
+        #entry-screen {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: #000;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            font-weight: 600;
+            letter-spacing: 3px;
+            color: rgba(255,255,255,0.75);
+            text-shadow: 0 0 20px rgba(0,240,255,0.5);
+            cursor: pointer;
+            transition: opacity 0.8s ease;
+        }
+        #entry-screen.fade-out {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(32px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes popIn {
+            0%   { opacity: 0; transform: scale(0.7); }
+            70%  { transform: scale(1.06); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-24px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes glowPulse {
+            0%, 100% { box-shadow: 0 0 18px rgba(255,255,255,0.18); }
+            50%       { box-shadow: 0 0 38px rgba(255,255,255,0.38); }
+        }
+        @keyframes cardFadeIn {
+            from { opacity: 0; transform: scale(0.95) translateY(20px); }
+            to   { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        @keyframes shineSweep {
+            0%   { left: -75%; }
+            100% { left: 125%; }
+        }
+
+        /* ── Rotating glow border ────────────────────── */
+        @keyframes rotateBorder {
+            0%   { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .profile {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100vh;
+            z-index: 10;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* ── Card wrapper for glow border ───────────── */
+        .card-wrapper {
+            position: relative;
+            border-radius: 24px;
+            background: transparent;
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            overflow: hidden;
+            border: 3px solid rgba(255, 255, 255, 0.25);
+        }
+
+        .card {
+            position: relative;
+            z-index: 2;
+            background: transparent;
+            border-radius: 22px;
+            padding: 36px 40px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 24px;
+            width: 420px;
+            max-width: 90vw;
+            opacity: 0;
+        }
+        .card.animate {
+            animation: cardFadeIn 0.7s ease 0.2s forwards;
+        }
+
+        .top-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            width: 100%;
+        }
+
+        .avatar {
+            width: 100px;
+            height: 100px;
+            flex-shrink: 0;
+            border: 3px solid rgba(255,255,255,0.55);
+            border-radius: 16px;
+            overflow: hidden;
+            opacity: 0;
+        }
+        .avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .avatar.animate {
+            animation:
+                popIn 0.7s cubic-bezier(0.34,1.56,0.64,1) 0.5s forwards,
+                glowPulse 3s ease-in-out 1.4s infinite;
+        }
+
+        .name {
+            font-size: 26px;
+            font-weight: 700;
+            color: rgba(255,255,255,0.88);
+            text-shadow: 0 2px 12px rgba(0,0,0,0.6);
+            opacity: 0;
+            white-space: nowrap;
+        }
+        .name.animate {
+            animation: fadeUp 0.65s ease 0.85s forwards;
+        }
+
+        .divider {
+            width: 100%;
+            height: 1px;
+            background: rgba(255,255,255,0.12);
+        }
+
+        .btn-row {
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+            width: 100%;
+        }
+
+        .btn {
+            width: 56px;
+            height: 56px;
+            border-radius: 14px;
+            text-decoration: none;
+            opacity: 0;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            line-height: 1;
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            transition:
+                transform 0.3s cubic-bezier(0.34,1.56,0.64,1),
+                box-shadow 0.3s ease,
+                background 0.3s ease,
+                border-color 0.3s ease;
+        }
+
+        .btn::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -75%;
+            width: 50%;
+            height: 100%;
+            background: linear-gradient(
+                120deg,
+                transparent 0%,
+                rgba(255,255,255,0.28) 50%,
+                transparent 100%
+            );
+            transform: skewX(-20deg);
+            opacity: 0;
+            transition: opacity 0.1s ease;
+            pointer-events: none;
+        }
+        .btn:hover::after {
+            opacity: 1;
+            animation: shineSweep 0.55s ease forwards;
+        }
+
+        .btn:hover {
+            transform: translateY(-4px) scale(1.12);
+            box-shadow:
+                0 8px 24px rgba(255,255,255,0.25),
+                0 0 0 1px rgba(255,255,255,0.3);
+            border-color: rgba(255,255,255,0.6);
+        }
+        .btn:active {
+            transform: translateY(-1px) scale(1.04);
+            box-shadow: 0 4px 12px rgba(255,255,255,0.15);
+        }
+
+        .btn i {
+            font-size: 22px;
+            line-height: 1;
+            display: block;
+            transition: transform 0.35s cubic-bezier(0.34,1.56,0.64,1);
+        }
+        .btn svg {
+            display: block;
+            transition: transform 0.35s cubic-bezier(0.34,1.56,0.64,1);
+        }
+        .btn:hover i,
+        .btn:hover svg {
+            transform: scale(1.5);
+        }
+
+        .discord-btn {
+            background: rgba(88,101,242,0.3);
+            color: white;
+            border: 1.5px solid rgba(88,101,242,0.5);
+        }
+        .discord-btn:hover { background: rgba(88,101,242,0.5); }
+        .discord-btn.animate { animation: fadeUp 0.6s ease 1.1s forwards; }
+
+        .tiktok-btn {
+            background: rgba(0,0,0,0.2);
+            color: white;
+            border: 1.5px solid rgba(255,255,255,0.3);
+        }
+        .tiktok-btn:hover { background: rgba(20,20,20,0.4); }
+        .tiktok-btn.animate { animation: fadeUp 0.6s ease 1.3s forwards; }
+
+        .roblox-btn {
+            background: rgba(0, 93, 191, 0.3);
+            color: white;
+            border: 1.5px solid rgba(0, 93, 191, 0.5);
+        }
+        .roblox-btn:hover { background: rgba(0, 93, 191, 0.5); }
+        .roblox-btn.animate { animation: fadeUp 0.6s ease 1.5s forwards; }
+
+        .volume {
+            position: fixed;
+            top: 24px;
+            left: 24px;
+            background: rgba(0,0,0,0.55);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255,255,255,0.15);
+            padding: 10px 16px;
+            border-radius: 50px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            z-index: 20;
+            opacity: 0;
+        }
+        .volume.animate { animation: slideDown 0.55s ease 1.75s forwards; }
+        .volume i {
+            font-size: 14px;
+            color: rgba(255,255,255,0.7);
+            width: 16px;
+            text-align: center;
+        }
+
+        #volume-slider {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 120px;
+            height: 4px;
+            border-radius: 4px;
+            background: rgba(255,255,255,0.2);
+            outline: none;
+            cursor: pointer;
+            accent-color: rgba(255,255,255,0.7);
+        }
+        #volume-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.85);
+            box-shadow: 0 0 6px rgba(255,255,255,0.4);
+            cursor: pointer;
+            transition: transform 0.15s;
+        }
+        #volume-slider::-webkit-slider-thumb:hover { transform: scale(1.25); }
+        #volume-slider::-moz-range-thumb {
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.85);
+            border: none;
+            cursor: pointer;
+        }
+        #volume-slider::-moz-range-track {
+            background: rgba(255,255,255,0.2);
+            height: 4px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+
+    <video id="bg-video" autoplay loop playsinline muted>
+        <source src="7515519815646334254.mp4" type="video/mp4">
+    </video>
+
+    <div id="entry-screen">Click anywhere to enter</div>
+
+    <div class="profile" id="profile">
+
+        <!-- Wrapper creates the rotating glow border -->
+        <div class="card-wrapper">
+            <div class="card" id="card">
+
+                <div class="top-row">
+                    <div class="avatar" id="avatar">
+                        <img src="943215.png" alt="ハッシュブルーム">
+                    </div>
+                    <div class="name" id="name">ハッシュブルーム</div>
+                </div>
+
+                <div class="divider"></div>
+
+                <div class="btn-row">
+                    <a href="https://discord.gg/UQxjBR6j" target="_blank" class="btn discord-btn" id="btn-discord" title="Discord">
+                        <i class="fa-brands fa-discord"></i>
+                    </a>
+                    <a href="https://www.tiktok.com/@to_v1c" target="_blank" class="btn tiktok-btn" id="btn-tiktok" title="TikTok">
+                        <i class="fa-brands fa-tiktok"></i>
+                    </a>
+                    <a href="https://www.roblox.com/users/3400160061/profile" target="_blank" class="btn roblox-btn" id="btn-roblox" title="Roblox">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 512 512" fill="white">
+                            <path d="M105.5 64L64 406.5 406.5 448 448 105.5zM307.9 315.4l-91.3-11.5 11.5-91.3 91.3 11.5z"/>
+                        </svg>
+                    </a>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <div class="volume" id="volume-widget">
+        <i class="fa-solid fa-volume-high" id="vol-icon"></i>
+        <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="0.7">
+    </div>
+
+    <script>
+        const video        = document.getElementById('bg-video');
+        const entryScreen  = document.getElementById('entry-screen');
+        const profile      = document.getElementById('profile');
+        const slider       = document.getElementById('volume-slider');
+        const volIcon      = document.getElementById('vol-icon');
+        const card         = document.getElementById('card');
+        const avatar       = document.getElementById('avatar');
+        const name         = document.getElementById('name');
+        const btnDiscord   = document.getElementById('btn-discord');
+        const btnTiktok    = document.getElementById('btn-tiktok');
+        const btnRoblox    = document.getElementById('btn-roblox');
+        const volumeWidget = document.getElementById('volume-widget');
+
+        video.volume = 0.7;
+
+        document.addEventListener('click', () => {
+            entryScreen.classList.add('fade-out');
+            setTimeout(() => entryScreen.style.display = 'none', 800);
+
+            profile.style.display = 'flex';
+            video.classList.add('visible');
+            video.muted = false;
+            video.play();
+
+            requestAnimationFrame(() => {
+                card.classList.add('animate');
+                avatar.classList.add('animate');
+                name.classList.add('animate');
+                btnDiscord.classList.add('animate');
+                btnTiktok.classList.add('animate');
+                btnRoblox.classList.add('animate');
+                volumeWidget.classList.add('animate');
+            });
+        }, { once: true });
+
+        slider.addEventListener('input', () => {
+            const v = parseFloat(slider.value);
+            video.volume = v;
+            if (v === 0)       volIcon.className = 'fa-solid fa-volume-xmark';
+            else if (v < 0.5)  volIcon.className = 'fa-solid fa-volume-low';
+            else               volIcon.className = 'fa-solid fa-volume-high';
+        });
+    </script>
+</body>
+</html>
